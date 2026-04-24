@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight Tracker — Local</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #080c10;
+    --surface: #0d1520;
+    --border:  #1a2a3a;
+    --accent:  #00d4ff;
+    --warn:    #ff6b35;
+    --ok:      #00e676;
+    --muted:   #4a6070;
+    --text:    #c8dde8;
+    --mono:    'JetBrains Mono', monospace;
+    --sans:    'Syne', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── 헤더 ── */
+  header {
+    height: 48px;
+    min-height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    z-index: 1000;
+  }
+
+  .logo {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .logo span { color: var(--text); opacity: 0.5; font-weight: 400; }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+  }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.error { background: var(--warn); }
+
+  .stat {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .stat b { color: var(--accent); font-weight: 600; }
+
+  .updated {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+
+  /* ── 레이아웃 ── */
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ── 사이드패널 ── */
+  .sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+  }
+
+  .sidebar-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .filters {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .filter-label {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text);
+  }
+
+  .toggle {
+    width: 32px; height: 16px;
+    background: var(--border);
+    border-radius: 8px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    width: 12px; height: 12px;
+    background: white;
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(16px); }
+
+  /* ── 비행기 목록 ── */
+  .flight-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .flight-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .flight-item:hover { background: rgba(0,212,255,0.05); }
+  .flight-item.selected { background: rgba(0,212,255,0.1); border-left: 2px solid var(--accent); }
+
+  .fi-row1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+  }
+
+  .callsign {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+
+  .icao {
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .fi-row2 {
+    display: flex;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .fi-val { color: var(--text); }
+
+  /* ── 지도 ── */
+  #map {
+    flex: 1;
+    background: var(--bg);
+  }
+
+  /* ── 상세 팝업 (우측 하단) ── */
+  .detail-panel {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    z-index: 500;
+    display: none;
+    overflow: hidden;
+  }
+  .detail-panel.show { display: block; }
+
+  .dp-header {
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .dp-callsign {
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .dp-close {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+  }
+  .dp-close:hover { color: var(--text); }
+
+  .dp-grid {
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 6px;
+  }
+
+  .dp-cell { }
+  .dp-key {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .dp-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  /* ── 에러 배너 ── */
+  .error-banner {
+    display: none;
+    position: absolute;
+    top: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,107,53,0.15);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    padding: 6px 16px;
+    font-size: 11px;
+    border-radius: 4px;
+    z-index: 2000;
+  }
+
+  /* Leaflet 오버라이드 */
+  .leaflet-container { background: #060b10; }
+  .leaflet-popup-content-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .leaflet-popup-tip { background: var(--surface); }
+  .leaflet-control-zoom a {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-control-zoom a:hover { background: var(--bg) !important; }
+  .leaflet-control-attribution { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Flight<span>Track</span></div>
+  <div class="status-pill">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">연결 중...</span>
+  </div>
+  <div class="stat">항공기 <b id="countVal">0</b></div>
+  <div class="stat">갱신 주기 <b>{{ pull_interval }}s</b></div>
+  <div class="updated" id="updatedAt">—</div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">항공기 목록</div>
+    <div class="filters">
+      <div>
+        <div class="filter-label">콜사인 / ICAO 검색</div>
+        <input type="text" id="searchInput" placeholder="ex) KAL, 71...">
+      </div>
+      <div class="toggle-row">
+        <span>지상 항공기 숨기기</span>
+        <div class="toggle on" id="hideGroundToggle" onclick="toggleGround()"></div>
+      </div>
+    </div>
+    <div class="flight-list" id="flightList"></div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<div class="detail-panel" id="detailPanel">
+  <div class="dp-header">
+    <div class="dp-callsign" id="dpCallsign">—</div>
+    <div class="dp-close" onclick="closeDetail()">×</div>
+  </div>
+  <div class="dp-grid" id="dpGrid"></div>
+</div>
+
+<div class="error-banner" id="errorBanner"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── 상태 ──────────────────────────────────────────────────────────────────
+let allFlights   = [];
+let markers      = {};
+let selectedIcao = null;
+let hideGround   = true;
+
+// ── 지도 초기화 ───────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [37.5, 127.0],
+  zoom: 8,
+  zoomControl: true,
+});
+
+// 다크 타일 (CartoDB Dark Matter)
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+}).addTo(map);
+
+// ── 마커 아이콘 ───────────────────────────────────────────────────────────
+function makeIcon(heading, onGround, selected) {
+  const color   = onGround ? '#4a6070' : (selected ? '#ffffff' : '#00d4ff');
+  const shadow  = selected ? 'filter:drop-shadow(0 0 4px #00d4ff)' : '';
+  const size    = selected ? 26 : 20;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24"
+         style="transform:rotate(${heading || 0}deg);${shadow}">
+      <path d="M12 2L8 14H5L7 16H10.5L12 22L13.5 16H17L19 14H16L12 2Z"
+            fill="${color}" opacity="${onGround ? 0.4 : 1}"/>
+    </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize:   [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+// ── 데이터 가져오기 ───────────────────────────────────────────────────────
+async function fetchFlights() {
+  try {
+    const res  = await fetch('/api/flights');
+    const data = await res.json();
+
+    if (data.error) {
+      showError(data.error);
+    } else {
+      hideError();
+      setStatus(true, `live · s3 iceberg`);
+    }
+
+    allFlights = data.flights || [];
+    document.getElementById('countVal').textContent = data.count || 0;
+    document.getElementById('updatedAt').textContent =
+      data.updated_at ? 'updated ' + new Date(data.updated_at).toLocaleTimeString('ko-KR') : '—';
+
+    updateMap();
+    updateList();
+  } catch (e) {
+    setStatus(false, 'API 오류');
+    showError('서버 연결 실패: ' + e.message);
+  }
+}
+
+// ── 지도 마커 업데이트 ────────────────────────────────────────────────────
+function updateMap() {
+  const visible = getFiltered();
+  const visibleSet = new Set(visible.map(f => f.icao24));
+
+  // 사라진 마커 제거
+  Object.keys(markers).forEach(icao => {
+    if (!visibleSet.has(icao)) {
+      markers[icao].remove();
+      delete markers[icao];
+    }
+  });
+
+  visible.forEach(f => {
+    const sel  = f.icao24 === selectedIcao;
+    const icon = makeIcon(f.heading, f.on_ground, sel);
+
+    if (markers[f.icao24]) {
+      markers[f.icao24].setLatLng([f.lat, f.lon]);
+      markers[f.icao24].setIcon(icon);
+    } else {
+      const m = L.marker([f.lat, f.lon], { icon })
+        .addTo(map)
+        .on('click', () => selectFlight(f.icao24));
+      markers[f.icao24] = m;
+    }
+  });
+}
+
+// ── 사이드 리스트 ─────────────────────────────────────────────────────────
+function updateList() {
+  const list    = document.getElementById('flightList');
+  const visible = getFiltered();
+
+  list.innerHTML = '';
+  visible.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'flight-item' + (f.icao24 === selectedIcao ? ' selected' : '');
+    div.innerHTML = `
+      <div class="fi-row1">
+        <span class="callsign">${f.callsign || f.icao24}</span>
+        <span class="icao">${f.icao24}</span>
+      </div>
+      <div class="fi-row2">
+        <span>${f.origin_country || '—'}</span>
+        <span>ALT <span class="fi-val">${f.altitude != null ? Math.round(f.altitude) + 'm' : '—'}</span></span>
+        <span>SPD <span class="fi-val">${f.velocity != null ? Math.round(f.velocity * 1.944) + 'kt' : '—'}</span></span>
+      </div>`;
+    div.onclick = () => selectFlight(f.icao24);
+    list.appendChild(div);
+  });
+}
+
+// ── 필터링 ────────────────────────────────────────────────────────────────
+function getFiltered() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  return allFlights.filter(f => {
+    if (hideGround && f.on_ground) return false;
+    if (q && !f.callsign?.toLowerCase().includes(q) && !f.icao24.includes(q)) return false;
+    return true;
+  });
+}
+
+document.getElementById('searchInput').addEventListener('input', () => {
+  updateMap();
+  updateList();
+});
+
+function toggleGround() {
+  hideGround = !hideGround;
+  document.getElementById('hideGroundToggle').classList.toggle('on', hideGround);
+  updateMap();
+  updateList();
+}
+
+// ── 선택 & 상세 ───────────────────────────────────────────────────────────
+function selectFlight(icao24) {
+  selectedIcao = icao24;
+  const f = allFlights.find(x => x.icao24 === icao24);
+  if (!f) return;
+
+  map.panTo([f.lat, f.lon]);
+  updateMap();
+  updateList();
+  showDetail(f);
+}
+
+function showDetail(f) {
+  document.getElementById('dpCallsign').textContent = f.callsign || f.icao24;
+  document.getElementById('dpGrid').innerHTML = `
+    <div class="dp-cell"><div class="dp-key">ICAO24</div><div class="dp-val">${f.icao24}</div></div>
+    <div class="dp-cell"><div class="dp-key">국가</div><div class="dp-val">${f.origin_country || '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">고도 (기압)</div><div class="dp-val">${f.altitude != null ? Math.round(f.altitude) + ' m' : '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">고도 (GPS)</div><div class="dp-val">${f.geo_altitude != null ? Math.round(f.geo_altitude) + ' m' : '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">속도</div><div class="dp-val">${f.velocity != null ? Math.round(f.velocity * 1.944) + ' kt' : '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">방향</div><div class="dp-val">${f.heading != null ? Math.round(f.heading) + '°' : '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">수직 속도</div><div class="dp-val">${f.vertical_rate != null ? f.vertical_rate.toFixed(1) + ' m/s' : '—'}</div></div>
+    <div class="dp-cell"><div class="dp-key">지상 여부</div><div class="dp-val">${f.on_ground ? 'ON GROUND' : 'AIRBORNE'}</div></div>
+    <div class="dp-cell"><div class="dp-key">위도</div><div class="dp-val">${f.lat.toFixed(4)}</div></div>
+    <div class="dp-cell"><div class="dp-key">경도</div><div class="dp-val">${f.lon.toFixed(4)}</div></div>
+  `;
+  document.getElementById('detailPanel').classList.add('show');
+}
+
+function closeDetail() {
+  selectedIcao = null;
+  document.getElementById('detailPanel').classList.remove('show');
+  updateMap();
+  updateList();
+}
+
+// ── 상태 표시 ─────────────────────────────────────────────────────────────
+function setStatus(ok, msg) {
+  const dot  = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className  = 'dot ' + (ok ? 'live' : 'error');
+  text.textContent = msg;
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorBanner');
+  el.textContent = '⚠ ' + msg;
+  el.style.display = 'block';
+}
+function hideError() {
+  document.getElementById('errorBanner').style.display = 'none';
+}
+
+// ── 폴링 시작 ─────────────────────────────────────────────────────────────
+fetchFlights();
+setInterval(fetchFlights, {{ pull_interval }} * 1000);
+</script>
+</body>
+</html>
